@@ -1,0 +1,9 @@
+name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
+huc_wgs84|stem|c07011ed4f321537|c5cfd9026658d44a|5e37dfbb62508816|1037948414||t20546.7403472222s|s5124b|5124|rds|local|vector|||1.89||
+gauges|stem|3271b691766a8b06|6d7ae62ab29aabe5|17de80b3a0455922|2069372406||t20546.7404166667s|s2013b|2013|rds|local|vector|||5.7||
+daily_discharge|stem|8244eed271eff14d|8e14f81c7c8397ff|0e943d004ea97cfa|-467410441||t20546.7404166667s|s2781b|2781|rds|local|vector|||0.47||
+download_report|stem|e6414c50d731a467|09c81e19826ca9d6|1c518f05cd35224f|-827787319|Rmd/download_report.html*Rmd/download_report.Rmd|t20546.7405555556s|s12020125b|12020125|file|local|vector|||12.34||
+get_daily_discharge|function|e62991eedba4b3da
+get_huc_boundary|function|a097f25c2fc18f7c
+get_gauges|function|0d499a299cde0c65
+make_figure|function|9e853fd2d54f478f

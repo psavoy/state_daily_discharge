@@ -1,0 +1,167 @@
+---
+title: "Daily discharge within the last month"
+author: "Phil Savoy"
+date: "Last updated on `r format(Sys.time(), '%d %B, %Y, %H:%M')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    df_print: paged
+    number_sections: true
+    theme:
+      bg: "#2E3440"
+      fg: "#ECEFF4"
+      primary: "#5E81AC"
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding) })
+---
+
+```{r, include=F}
+#===============================================================================
+#Setup
+#===============================================================================
+#Set global chunk options
+  knitr::opts_chunk$set(
+    message=F, 
+    warning=F,
+    echo=F
+  )
+
+#Decimal display
+  options(scipen = 10000)
+  
+#Read in data from the pipeline
+  tar_load(gauges)
+  tar_load(daily_discharge)
+  tar_load(huc_wgs84)
+```
+
+# Map of locations and discharge data
+
+Below is a linked map of locations actively reporting discharge within the past 30 days and the corresponding plots of discharge time series.
+
+```{r, include=F}
+#===============================================================================
+#Link data with crosstalk
+#===============================================================================
+gauges_share <- SharedData$new(
+  gauges, 
+  key = ~monitoring_location_id, 
+  group = "group"
+)
+
+disch_share <- SharedData$new(
+  daily_discharge, 
+  key = ~monitoring_location_id, 
+  group = "group"
+)
+```
+
+
+```{r, include=FALSE}
+#===============================================================================
+#Make plots of daily discharge
+#===============================================================================
+#Make initial static map
+  discharge_plot <- ggplot(data = disch_share, aes(x = time, y = value)) + 
+    geom_line(color = "#4c566a", alpha = 0.5) +
+  
+    #Theme elements
+    ylab("Discharge (cubic feet per second)") +
+    xlab("Time") +
+    theme_classic() +
+    theme(
+      axis.title = element_text(color = "#D9DCE2"),
+      axis.text = element_text(color = "#D9DCE2"),
+      axis.line = element_line(size = 2, color="black"),
+      axis.ticks = element_line(size = 2, color="black"),
+      plot.background = element_rect(fill = "transparent"),
+      panel.background = element_rect(fill = "#F9F9F9")
+    )
+
+#Convert to interactive
+  discharge_html <- ggplotly(discharge_plot) %>% 
+    highlight(
+      on = "plotly_hover",
+      off = "plotly_doubleclick", 
+      color = "#4c566a"
+    )
+```
+
+
+```{r, include=F}
+#===============================================================================
+#Map of HUC and active gauges
+#===============================================================================
+map_html <- leaflet(gauges_share) %>% 
+  #Add background tiles
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  
+  #HUC boundary
+  addPolygons(
+    data = huc_wgs84, 
+    fillColor = "#4c566a",
+    fillOpacity = 0.1,
+    color = "#4c566a"
+  ) %>% 
+  addCircleMarkers(
+    fillColor = "#4c566a",
+    fillOpacity = 1,
+    radius = 4,
+    stroke = FALSE,
+    popup = ~htmlEscape(sprintf("ID: %s", monitoring_location_id))
+  ) 
+```
+
+
+```{r, fig.height=4, fig.width=6}
+#===============================================================================
+#Combine into final plot
+#===============================================================================
+bscols(
+  widths = c(12, 12),
+  map_html, 
+  discharge_html
+)
+```
+
+
+# Basic site information
+
+A basic table of site information about the unique location id, the site name, and the site type. Additionally, it shows the breakdown of how much of the data is still in a provisional versus approved status.
+
+```{r, include=F}
+#===============================================================================
+#Get breakdown of approval status by locaiton
+#===============================================================================
+approved_breakdown <- daily_discharge %>% 
+  #Calculate percentage of approvate data by location
+  sf::st_drop_geometry() %>% 
+  group_by(monitoring_location_id, approval_status) %>% 
+  summarise(n = n()) %>%
+  mutate(percent = n / sum(n) * 100)  %>% 
+  
+  #Pivot wide
+  tidyr::pivot_wider(
+    id_cols = monitoring_location_id, 
+    names_from = approval_status, 
+    values_from = c("percent")
+  )
+```
+
+
+```{r}
+#===============================================================================
+#Table of basic site information
+#===============================================================================
+  gauges %>%
+    sf::st_drop_geometry() %>% 
+    inner_join(approved_breakdown) %>% 
+    kbl(
+      caption = "Gauges with daily data in the past 30 days"
+    ) %>%
+    kable_styling(bootstrap_options = c("striped"))
+
+```
+
