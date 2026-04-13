@@ -32,9 +32,10 @@ knit: (function(inputFile, encoding) {
   options(scipen = 10000)
   
 #Read in data from the pipeline
-  tar_load(gauges)
+  tar_load(gauges_wgs84)
   tar_load(daily_discharge)
-  tar_load(huc_wgs84)
+  tar_load(counties_wgs84)
+  tar_load(state_wgs84)
 ```
 
 # Map of locations and discharge data
@@ -46,7 +47,7 @@ Below is a linked map of locations actively reporting discharge within the past 
 #Link data with crosstalk
 #===============================================================================
 gauges_share <- SharedData$new(
-  gauges, 
+  gauges_wgs84, 
   key = ~monitoring_location_id, 
   group = "group"
 )
@@ -74,8 +75,8 @@ disch_share <- SharedData$new(
     theme(
       axis.title = element_text(color = "#D9DCE2"),
       axis.text = element_text(color = "#D9DCE2"),
-      axis.line = element_line(size = 2, color="black"),
-      axis.ticks = element_line(size = 2, color="black"),
+      axis.line = element_line(linewidth = 2, color="black"),
+      axis.ticks = element_line(linewidth = 2, color="black"),
       plot.background = element_rect(fill = "transparent"),
       panel.background = element_rect(fill = "#F9F9F9")
     )
@@ -98,13 +99,7 @@ map_html <- leaflet(gauges_share) %>%
   #Add background tiles
   addProviderTiles(providers$CartoDB.Positron) %>% 
   
-  #HUC boundary
-  addPolygons(
-    data = huc_wgs84, 
-    fillColor = "#4c566a",
-    fillOpacity = 0.1,
-    color = "#4c566a"
-  ) %>% 
+  #Add points
   addCircleMarkers(
     fillColor = "#4c566a",
     fillOpacity = 1,
@@ -153,15 +148,221 @@ approved_breakdown <- daily_discharge %>%
 
 ```{r}
 #===============================================================================
+#Define custom reactable theme
+#===============================================================================
+my_theme <- function(font_size = 14, font_color = "#ECEFF4", header_font_size = 15,
+  header_font_color = "#ECEFF4", background_color = "#2E3440", cell_padding = 6,
+  centered = FALSE){
+
+  if(!is.logical(centered)){
+    stop("`centered` must be TRUE or FALSE")
+  }
+
+  if(centered == TRUE){
+    centered_content = list(display = "flex", flexDirection = "column", justifyContent = "center")
+  } else {centered_content = NULL}
+
+  reactableTheme(
+    cellStyle = centered_content,
+    color = font_color,
+    backgroundColor = background_color,
+    borderColor = "#ECEFF4",
+    borderWidth = "1px",
+    stripedColor = "#d8dee9",
+    highlightColor = "#d8dee9",
+    cellPadding = cell_padding,
+    tableStyle = list(fontSize = font_size),
+    headerStyle = list(
+      borderWidth = "2px",
+      color = header_font_color,
+      transitionDuration = "0.5s",
+      "&:hover[aria-sort]" = list(color = "#ECEFF4"),
+      "&[aria-sort='ascending'], &[aria-sort='descending']" = list(color = "#ECEFF4"),
+      fontSize = header_font_size
+    ),
+    groupHeaderStyle = list(
+      "&:not(:empty)" = list(color = font_color, fontSize = header_font_size),
+      "&:hover" = list(
+        fontWeight = "bold",
+        transitionDuration = "1s",
+        transitionTimingFunction = "ease-out",
+        color = "#d8dee9"
+      )
+    ),
+    searchInputStyle = list(
+      backgroundColor = "#ECEFF4",
+      color = "#212529",
+      borderColor = "#222222",
+      "&:focus" = list(color = "#212529")
+    ),
+    inputStyle = list(backgroundColor = "#ECEFF4", color = "#212529"),
+    rowSelectedStyle = list(backgroundColor = "#2E3440", color = "#ECEFF4"),
+    selectStyle = list(
+      backgroundColor = "#81a1c1",
+      color = "#ECEFF4",
+      borderColor = "#ECEFF4",
+      outlineColor = "#ECEFF4",
+      "&:hover" = list(backgroundColor = "#88c0d0")
+    ),
+    pageButtonStyle = list(
+      backgroundColor = "#81a1c1",
+      color = "#ECEFF4",
+      "&:hover" = list(backgroundColor = "#88c0d0")
+    ),
+    pageButtonHoverStyle = list(backgroundColor = "#88c0d0", color = "#ECEFF4"),
+    pageButtonActiveStyle = list(backgroundColor = "#88c0d0", color = "#ECEFF4"),
+    pageButtonCurrentStyle = list(backgroundColor = "#88c0d0", color = "#ECEFF4")
+  )
+}
+```
+
+
+```{r}
+#===============================================================================
 #Table of basic site information
 #===============================================================================
-  gauges %>%
-    sf::st_drop_geometry() %>% 
-    inner_join(approved_breakdown) %>% 
-    kbl(
-      caption = "Gauges with daily data in the past 30 days"
-    ) %>%
-    kable_styling(bootstrap_options = c("striped"))
+gauges_wgs84 %>%
+  #Drop geometry and join
+  sf::st_drop_geometry() %>% 
+  inner_join(approved_breakdown) %>% 
+
+  #Make table
+  reactable(
+    defaultPageSize = 15,
+    theme = my_theme(font_size = 9, header_font_size = 9)
+  ) 
 
 ```
 
+# Data support
+
+```{r}
+#===============================================================================
+#Get count of gauges and records per county
+#===============================================================================
+#Spatially join gauges with counties
+  gauge_county_wgs84 <- sf::st_join(
+    gauges_wgs84, 
+    counties_wgs84, 
+    join = st_intersects
+  ) 
+      
+#Drop the geometry
+  gauge_county <- gauge_county_wgs84 %>% 
+    #Drop geometry
+    sf::st_drop_geometry() %>% 
+    select(-ID)
+    
+#Number of gauges per county
+  gauge_count <- gauge_county %>% 
+    group_by(county) %>% 
+    count() %>% 
+    rename(gauges = n) %>% 
+    data.frame()
+  
+#Number of days of 
+  record_count <- daily_discharge %>% 
+    #Join with county data
+    left_join(., gauge_county, by = "monitoring_location_id")  %>% 
+    
+    #Get number of records by county
+    group_by(county) %>% 
+    count() %>% 
+    rename(daily_records = n) %>% 
+    data.frame()
+
+#Merge in gauge and record count
+  county_counts_wgs84 <- merge(
+    merge(
+      counties_wgs84, 
+      gauge_count,
+      by = "county"
+    ),
+    record_count,
+    by = "county"
+  )
+```
+
+
+```{r}
+#===============================================================================
+#Reproject based on UTM zone for state centroid
+#===============================================================================
+#Get centroid, I know it is not exact because of geometric coordinates
+  centroid <- sf::st_centroid(state_wgs84) 
+  
+#Get UTM zone
+  utm_zone <- (floor((st_coordinates(centroid)[, "X"] + 180)/6) %% 60) + 1
+
+#Define projection string
+  state_proj <- paste0("+proj=utm +zone=", utm_zone," ellps=WGS84")
+
+#Reproject into UTM
+  state_utm <- sf::st_transform(state_wgs84, state_proj)  
+  county_counts_utm <- sf::st_transform(county_counts_wgs84, state_proj)  
+```
+
+
+```{r}
+#===============================================================================
+#Prepare maps
+#===============================================================================
+#Define a base plot
+  base_plot <- ggplot() + 
+    #State outline
+    with_outer_glow(
+      geom_sf(data = state_utm, color = "black", alpha = 0.8),
+      colour = "black", 
+      sigma = 3
+    ) + 
+  
+    #Theme elements
+    guides(fill = guide_colourbar(barwidth = 6, barheight = 1)) +
+    theme_classic() +
+    theme(
+      text = element_text(size = 9, color = "#F9F9F9"),
+      legend.position = "bottom",
+      legend.background = element_rect(
+        fill = "#2E3440", 
+        size = 0.5,
+        linetype = "solid"
+      ),
+      axis.line = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks = element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      panel.background = element_rect(fill = "#2E3440", colour = NA), 
+      plot.background = element_rect(fill = "#2E3440", colour = NA)
+    )    
+    
+    
+#Number of gauges
+  gauge_plot <- base_plot + 
+    #County level summary
+    geom_sf(data = county_counts_utm, aes(fill = gauges)) + 
+    scale_fill_gradient(
+      low = "#eceff4",
+      high = "#bf616a",
+      ""
+    ) +
+    ggtitle("Number of gauges")
+
+#Number of days of data
+  records_plot <- base_plot + 
+    #County level summary
+    geom_sf(data = county_counts_utm, aes(fill = daily_records)) + 
+    scale_fill_gradient(
+      low = "#eceff4",
+      high = "#bf616a",
+      ""
+    ) +
+    ggtitle("Number of daily records")
+```
+
+
+
+```{r, dev = "png", dev.args=list(bg="transparent")}
+ggpubr::ggarrange(gauge_plot, records_plot)
+```
